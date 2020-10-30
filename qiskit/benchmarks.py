@@ -1,28 +1,32 @@
 import pytest
 import mkl
-import uuid
 from qiskit import Aer, QuantumCircuit
 from qiskit.compiler import transpile, assemble
 mkl.set_num_threads(1)
 
 backend = Aer.get_backend("qasm_simulator")
+version = [int(i) for i in backend.configuration().backend_version.split('.')]
+
 default_options = {
-    "method": "statevector",   # Force dense statevector method for benchmarks
-    "truncate_enable": False,  # Disable unused qubit truncation for benchmarks
-    "max_parallel_threads": 1  # Disable OpenMP parallelization for benchmarks
+    "method": "statevector",    # Force dense statevector method for benchmarks
+    "truncate_enable": False,   # Disable unused qubit truncation for benchmarks
+    "max_parallel_threads": 1,  # Disable OpenMP parallelization for benchmarks
 }
 
-def _execute(circuit, backend_options=None):
-    experiment = transpile(circuit, backend)
-    qobj = assemble(experiment, shots=1)
-    qobj_aer = backend._format_qobj(qobj, backend_options, None)
-    return backend._controller(qobj_aer)
+gate_options = default_options.copy()
+gate_options["fusion_enabled"] = False
 
-def native_execute(benchmark, circuit, backend_options=None):
+gpu_options = default_options.copy()
+gpu_options["method"] = "statevector_gpu"
+
+def native_execute(benchmark, circuit, backend_options={}):
     experiment = transpile(circuit, backend)
-    qobj = assemble(experiment, shots=1)
-    qobj_aer = backend._format_qobj(qobj, backend_options, None)
-    benchmark(backend._controller, qobj_aer)
+    qobj = assemble(experiment, shots=1, **backend_options)
+    if version[1] < 7:
+        qobj_aer = backend._format_qobj(qobj, None, None)
+        benchmark(backend._controller, qobj_aer)
+    else:
+        benchmark(backend._execute, qobj)
 
 def run_bench(benchmark, nqubits, gate, args=(3, )):
     qc = QuantumCircuit(nqubits)
@@ -60,8 +64,7 @@ def generate_qcbm_circuit(nqubits, depth, pairs):
     last_rotation(circuit, nqubits)
     return circuit
 
-
-nqubit_list = range(4, 26)
+nqubit_list = range(4, 22)
 
 @pytest.mark.parametrize('nqubits', nqubit_list)
 def test_X(benchmark, nqubits):
